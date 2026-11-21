@@ -1,16 +1,14 @@
 from __future__ import annotations
 
-import logging
 import secrets
 from datetime import UTC, datetime, timedelta
-from email.message import EmailMessage
 from typing import Annotated
 
-import aiosmtplib
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 from neatsprint_lib.auth import Principal, require_permission
 from neatsprint_lib.errors import ApiError
+from neatsprint_lib.events import enqueue
 from neatsprint_lib.ids import new_id
 from sqlalchemy import select
 
@@ -27,8 +25,8 @@ from neatsprint_iam.services.accounts import (
     roles_for_user,
 )
 from neatsprint_iam.services.audit import audit
-
-logger = logging.getLogger(__name__)
+from neatsprint_iam.services.limits import enforce_user_seat_limit
+from neatsprint_iam.services.mailer import send_invitation
 
 router = APIRouter(prefix="/iam", tags=["invitations"])
 
@@ -48,31 +46,6 @@ def _out(invitation: Invitation, dev_token: str | None = None) -> InvitationOut:
     )
 
 
-async def _send_email(request: Request, email: str, token: str) -> None:
-    settings = request.app.state.settings
-    if not settings.email_enabled:
-        return
-    link = f"{settings.web_base_url}/accept-invitation?token={token}"
-    message = EmailMessage()
-    message["From"] = settings.smtp_from
-    message["To"] = email
-    message["Subject"] = "You have been invited to NeatSprint"
-    message.set_content(
-        "You have been invited to join a NeatSprint workspace.\n\n"
-        f"Accept the invitation: {link}\n\n"
-        "If you were not expecting this, you can ignore this email."
-    )
-    try:
-        await aiosmtplib.send(
-            message,
-            hostname=settings.smtp_host,
-            port=settings.smtp_port,
-            timeout=5,
-        )
-    except Exception:  # noqa: BLE001 - email delivery must not fail the invite
-        logger.exception("invitation_email_failed", extra={"email": email})
-
-
 @router.post("/invitations", status_code=status.HTTP_201_CREATED, summary="Invite a user")
 async def create_invitation(
     payload: InvitationCreate,
@@ -83,6 +56,7 @@ async def create_invitation(
     email = normalise_email(str(payload.email))
     if await get_user_by_email(session, email) is not None:
         raise ApiError(409, "email_unavailable", "That email address cannot be used.")
+    await enforce_user_seat_limit(session, request, principal.tenant_id)
 
     admin_roles = await roles_for_user(session, principal.user_id)
     if "OWNER" not in {role.code for role in admin_roles}:
@@ -118,6 +92,13 @@ async def create_invitation(
         expires_at=datetime.now(tz=UTC) + timedelta(days=7),
     )
     session.add(invitation)
+    enqueue(
+        session,
+        event_type="invitation.created",
+        tenant_id=principal.tenant_id,
+        actor_id=principal.user_id,
+        payload={"invitation_id": str(invitation.id), "email": email},
+    )
     await audit(
         session,
         tenant_id=principal.tenant_id,
@@ -130,7 +111,7 @@ async def create_invitation(
     )
     await session.commit()
 
-    await _send_email(request, email, raw_token)
+    await send_invitation(request, to=email, token=raw_token)
     dev_token = raw_token if request.app.state.settings.environment == "local" else None
     return JSONResponse(
         envelope(request, _out(invitation, dev_token).model_dump(mode="json")),
@@ -235,6 +216,13 @@ async def accept_invitation(
         assigned_by=invitation.invited_by,
     )
     invitation.accepted_at = now
+    enqueue(
+        session,
+        event_type="user.created",
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        payload={"user_id": str(user.id), "email": user.email, "source": "invitation"},
+    )
 
     await audit(
         session,

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import JSONResponse
 from neatsprint_lib.auth import Principal, require_permission
 from neatsprint_lib.errors import ApiError
+from neatsprint_lib.events import enqueue
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -125,6 +126,13 @@ async def assign_roles(
         after={"roles": sorted(target_codes)},
         request=request,
     )
+    enqueue(
+        session,
+        event_type="user.roles_changed",
+        tenant_id=principal.tenant_id,
+        actor_id=principal.user_id,
+        payload={"user_id": str(user.id), "roles": sorted(target_codes)},
+    )
     await session.commit()
     return JSONResponse(envelope(request, (await _user_out(session, user)).model_dump(mode="json")))
 
@@ -175,6 +183,13 @@ async def update_user(
         before=before,
         after={"status": user.status, "job_title": user.job_title},
         request=request,
+    )
+    enqueue(
+        session,
+        event_type="user.deactivated" if user.status == "DISABLED" else "user.updated",
+        tenant_id=principal.tenant_id,
+        actor_id=principal.user_id,
+        payload={"user_id": str(user.id), "status": user.status},
     )
     await session.commit()
     return JSONResponse(envelope(request, (await _user_out(session, user)).model_dump(mode="json")))

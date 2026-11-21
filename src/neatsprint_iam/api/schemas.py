@@ -22,6 +22,26 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=16, max_length=512)
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str = Field(min_length=16, max_length=512)
+    password: str = Field(min_length=10, max_length=256)
+
+
+class SessionOut(BaseModel):
+    id: UUID
+    device_id: str | None
+    ip: str | None
+    user_agent: str | None
+    created_at: datetime
+    last_used_at: datetime | None
+    expires_at: datetime
+    current: bool
+
+
 class SessionUser(BaseModel):
     id: UUID
     email: str

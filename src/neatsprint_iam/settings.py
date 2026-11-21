@@ -12,6 +12,10 @@ class Settings(ServiceSettings):
     password_min_length: int = 10
 
     bootstrap_token: str | None = None
+    core_internal_url: str = "http://neatsprint-core:8000"
+    service_token: str | None = None
+    outbox_enabled: bool = True
+    outbox_stream: str = "neatsprint.events"
     web_base_url: str = "http://localhost:3000"
 
     smtp_host: str = "mailpit"

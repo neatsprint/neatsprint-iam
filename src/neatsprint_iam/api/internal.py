@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import JSONResponse
 from neatsprint_lib.errors import ApiError
+from neatsprint_lib.events import enqueue
 from sqlalchemy import select
 
 from neatsprint_iam.api.deps import SessionDep, require_bootstrap
@@ -18,6 +19,7 @@ from neatsprint_iam.services.accounts import (
     normalise_email,
     set_user_roles,
 )
+from neatsprint_iam.services.limits import enforce_user_seat_limit
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 
@@ -100,6 +102,7 @@ async def bootstrap_user(
     else:
         from neatsprint_lib.ids import new_id
 
+        await enforce_user_seat_limit(session, request, payload.tenant_id)
         user = User(
             id=new_id(),
             tenant_id=payload.tenant_id,
@@ -119,6 +122,13 @@ async def bootstrap_user(
         tenant_id=payload.tenant_id,
         role_ids=[role.id for role in roles],
         assigned_by=None,
+    )
+    enqueue(
+        session,
+        event_type="user.created",
+        tenant_id=payload.tenant_id,
+        actor_id=user.id,
+        payload={"user_id": str(user.id), "email": user.email, "source": "bootstrap"},
     )
     await session.commit()
 
