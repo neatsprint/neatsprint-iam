@@ -16,6 +16,7 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=256)
     device: DeviceInfo | None = None
+    captcha_token: str | None = None
 
 
 class RefreshRequest(BaseModel):
@@ -24,11 +25,19 @@ class RefreshRequest(BaseModel):
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+    captcha_token: str | None = None
 
 
 class ResetPasswordRequest(BaseModel):
     token: str = Field(min_length=16, max_length=512)
     password: str = Field(min_length=10, max_length=256)
+    captcha_token: str | None = None
+
+
+class GoogleLoginRequest(BaseModel):
+    id_token: str = Field(min_length=20, max_length=8192)
+    device: DeviceInfo | None = None
+    captcha_token: str | None = None
 
 
 class SessionOut(BaseModel):
@@ -87,6 +96,18 @@ class AssignRolesRequest(BaseModel):
     role_ids: list[UUID] = Field(min_length=1)
 
 
+class AvatarPresignRequest(BaseModel):
+    content_type: str = Field(min_length=3, max_length=64)
+
+
+class AvatarConfirmRequest(BaseModel):
+    object_key: str = Field(min_length=10, max_length=512)
+
+
+class AvatarOut(BaseModel):
+    avatar_url: str
+
+
 class InvitationCreate(BaseModel):
     email: EmailStr
     role_ids: list[UUID] = Field(min_length=1)
@@ -98,6 +119,7 @@ class InvitationAccept(BaseModel):
     full_name: str = Field(min_length=1, max_length=160)
     password: str = Field(min_length=10, max_length=256)
     device: DeviceInfo | None = None
+    captcha_token: str | None = None
 
 
 class InvitationOut(BaseModel):
@@ -118,6 +140,19 @@ class RoleOut(BaseModel):
     description: str | None
     is_system: bool
     permissions: list[str]
+
+
+class RoleCreate(BaseModel):
+    code: str = Field(pattern=r"^[A-Z][A-Z0-9_]{1,31}$")
+    name: str = Field(min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
+    permissions: list[str] = Field(min_length=1)
+
+
+class RoleUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    description: str | None = Field(default=None, max_length=500)
+    permissions: list[str] | None = None
 
 
 class PermissionOut(BaseModel):

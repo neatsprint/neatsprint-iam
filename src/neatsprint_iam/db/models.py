@@ -43,6 +43,7 @@ class User(Base, TenantMixin, TimestampMixin, SoftDeleteMixin):
     email: Mapped[str] = mapped_column(String(320), nullable=False)
     full_name: Mapped[str] = mapped_column(String(160), nullable=False)
     avatar_url: Mapped[str | None] = mapped_column(Text)
+    avatar_key: Mapped[str | None] = mapped_column(Text)
     job_title: Mapped[str | None] = mapped_column(String(120))
     timezone: Mapped[str] = mapped_column(String(64), nullable=False, default="UTC")
     locale: Mapped[str] = mapped_column(String(16), nullable=False, default="en")
@@ -63,6 +64,27 @@ class UserCredential(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     must_change: Mapped[bool] = mapped_column(nullable=False, default=False)
+
+
+class SocialAccount(Base):
+    __tablename__ = "social_accounts"
+    __table_args__ = (
+        UniqueConstraint("provider", "provider_subject", name="uq_social_provider_subject"),
+        Index("ix_social_user", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=new_id
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    email_at_provider: Mapped[str] = mapped_column(String(320), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class Session(Base, TenantMixin):

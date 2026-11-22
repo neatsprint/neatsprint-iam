@@ -25,6 +25,7 @@ from neatsprint_iam.services.accounts import (
     roles_for_user,
 )
 from neatsprint_iam.services.audit import audit
+from neatsprint_iam.services.captcha import verify_captcha
 from neatsprint_iam.services.limits import enforce_user_seat_limit
 from neatsprint_iam.services.mailer import send_invitation
 
@@ -58,6 +59,41 @@ async def create_invitation(
         raise ApiError(409, "email_unavailable", "That email address cannot be used.")
     await enforce_user_seat_limit(session, request, principal.tenant_id)
 
+    existing = (
+        await session.execute(
+            select(Invitation).where(
+                Invitation.tenant_id == principal.tenant_id,
+                Invitation.email == email,
+                Invitation.accepted_at.is_(None),
+                Invitation.revoked_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+
+    raw_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(tz=UTC) + timedelta(days=7)
+
+    if existing is not None:
+        invitation = existing
+        invitation.token_hash = hash_token(raw_token)
+        invitation.role_ids = list(payload.role_ids)
+        invitation.team_ids = list(payload.team_ids)
+        invitation.expires_at = expires_at
+        action = "invitation.resent"
+    else:
+        invitation = Invitation(
+            id=new_id(),
+            tenant_id=principal.tenant_id,
+            email=email,
+            token_hash=hash_token(raw_token),
+            invited_by=principal.user_id,
+            role_ids=list(payload.role_ids),
+            team_ids=list(payload.team_ids),
+            expires_at=expires_at,
+        )
+        session.add(invitation)
+        action = "invitation.created"
+
     admin_roles = await roles_for_user(session, principal.user_id)
     if "OWNER" not in {role.code for role in admin_roles}:
         target = (
@@ -80,21 +116,9 @@ async def create_invitation(
     if len(role_count) != len(set(payload.role_ids)):
         raise ApiError(422, "invalid_role", "One or more roles do not belong to this tenant.")
 
-    raw_token = secrets.token_urlsafe(32)
-    invitation = Invitation(
-        id=new_id(),
-        tenant_id=principal.tenant_id,
-        email=email,
-        token_hash=hash_token(raw_token),
-        invited_by=principal.user_id,
-        role_ids=list(payload.role_ids),
-        team_ids=list(payload.team_ids),
-        expires_at=datetime.now(tz=UTC) + timedelta(days=7),
-    )
-    session.add(invitation)
     enqueue(
         session,
-        event_type="invitation.created",
+        event_type=action,
         tenant_id=principal.tenant_id,
         actor_id=principal.user_id,
         payload={"invitation_id": str(invitation.id), "email": email},
@@ -103,7 +127,7 @@ async def create_invitation(
         session,
         tenant_id=principal.tenant_id,
         actor_id=principal.user_id,
-        action="invitation.created",
+        action=action,
         target_type="invitation",
         target_id=str(invitation.id),
         after={"email": email, "role_ids": [str(item) for item in payload.role_ids]},
@@ -169,6 +193,54 @@ async def revoke_invitation(
 
 
 @router.post(
+    "/invitations/{invitation_id}/resend",
+    status_code=status.HTTP_201_CREATED,
+    summary="Resend an invitation",
+)
+async def resend_invitation(
+    invitation_id: str,
+    principal: InvitePrincipal,
+    request: Request,
+    session: SessionDep,
+) -> JSONResponse:
+    invitation = await session.get(Invitation, invitation_id)
+    if invitation is None or invitation.tenant_id != principal.tenant_id:
+        raise ApiError(404, "not_found", "Invitation not found.")
+    if invitation.accepted_at is not None:
+        raise ApiError(410, "invitation_used", "This invitation has already been accepted.")
+    if invitation.revoked_at is not None:
+        raise ApiError(410, "invitation_revoked", "This invitation was revoked. Create a new one.")
+
+    raw_token = secrets.token_urlsafe(32)
+    invitation.token_hash = hash_token(raw_token)
+    invitation.expires_at = datetime.now(tz=UTC) + timedelta(days=7)
+    enqueue(
+        session,
+        event_type="invitation.resent",
+        tenant_id=principal.tenant_id,
+        actor_id=principal.user_id,
+        payload={"invitation_id": str(invitation.id), "email": invitation.email},
+    )
+    await audit(
+        session,
+        tenant_id=principal.tenant_id,
+        actor_id=principal.user_id,
+        action="invitation.resent",
+        target_type="invitation",
+        target_id=str(invitation.id),
+        request=request,
+    )
+    await session.commit()
+    await send_invitation(request, to=invitation.email, token=raw_token)
+
+    dev_token = raw_token if request.app.state.settings.environment == "local" else None
+    return JSONResponse(
+        envelope(request, _out(invitation, dev_token).model_dump(mode="json")),
+        status_code=status.HTTP_201_CREATED,
+    )
+
+
+@router.post(
     "/invitations/accept",
     status_code=status.HTTP_201_CREATED,
     summary="Accept an invitation and create the account",
@@ -176,6 +248,7 @@ async def revoke_invitation(
 async def accept_invitation(
     payload: InvitationAccept, request: Request, session: SessionDep
 ) -> JSONResponse:
+    await verify_captcha(request, payload.captcha_token)
     token_hash = hash_token(payload.token)
     invitation = (
         await session.execute(select(Invitation).where(Invitation.token_hash == token_hash))

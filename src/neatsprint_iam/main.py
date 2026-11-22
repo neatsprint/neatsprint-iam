@@ -21,6 +21,7 @@ from neatsprint_iam.api.auth import router as auth_router
 from neatsprint_iam.api.internal import router as internal_router
 from neatsprint_iam.api.invitations import router as invitations_router
 from neatsprint_iam.api.roles import router as roles_router
+from neatsprint_iam.api.social import router as social_router
 from neatsprint_iam.api.users import router as users_router
 from neatsprint_iam.security.keys import load_or_create_keys
 from neatsprint_iam.security.tokens import jwks
@@ -132,6 +133,7 @@ async def ping() -> dict[str, str]:
 
 
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(social_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1")
 app.include_router(invitations_router, prefix="/api/v1")

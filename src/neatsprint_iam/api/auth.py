@@ -22,8 +22,6 @@ from neatsprint_iam.api.schemas import (
     RefreshRequest,
     ResetPasswordRequest,
     SessionOut,
-    SessionUser,
-    TokenPair,
 )
 from neatsprint_iam.db.models import (
     PasswordResetToken,
@@ -39,7 +37,6 @@ from neatsprint_iam.security.passwords import (
     verify_password,
 )
 from neatsprint_iam.security.tokens import (
-    create_access_token,
     hash_token,
     new_refresh_token,
 )
@@ -50,59 +47,20 @@ from neatsprint_iam.services.accounts import (
     roles_for_user,
 )
 from neatsprint_iam.services.audit import audit
+from neatsprint_iam.services.captcha import verify_captcha
 from neatsprint_iam.services.mailer import send_password_reset
+from neatsprint_iam.services.session_tokens import issue_tokens, start_session
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 PrincipalDep = Annotated[Principal, Depends(get_principal)]
 
 
-def _session_user(user: User, roles: list[str], permissions: list[str]) -> SessionUser:
-    return SessionUser(
-        id=user.id,
-        email=user.email,
-        full_name=user.full_name,
-        tenant_id=user.tenant_id,
-        roles=roles,
-        permissions=permissions,
-    )
-
-
-def _issue(
-    request: Request,
-    *,
-    user: User,
-    session_id: UUID,
-    roles: list[str],
-    permissions: list[str],
-    refresh_token: str,
-) -> TokenPair:
-    settings = request.app.state.settings
-    access, expires_in = create_access_token(
-        private_key=request.app.state.private_key,
-        kid=request.app.state.jwt_kid,
-        issuer=settings.jwt_issuer,
-        audience=settings.jwt_audience,
-        user_id=user.id,
-        tenant_id=user.tenant_id,
-        session_id=session_id,
-        roles=roles,
-        permissions=permissions,
-        minutes=settings.access_token_minutes,
-    )
-    return TokenPair(
-        access_token=access,
-        expires_in=expires_in,
-        refresh_token=refresh_token,
-        user=_session_user(user, roles, permissions),
-    )
-
-
 @router.post("/login", response_model=None, summary="Exchange credentials for tokens")
 async def login(
     payload: LoginRequest, request: Request, session: SessionDep
 ) -> JSONResponse:
-    settings = request.app.state.settings
+    await verify_captcha(request, payload.captcha_token)
     user = await get_user_by_email(session, str(payload.email))
     credential = await session.get(UserCredential, user.id) if user else None
 
@@ -129,51 +87,12 @@ async def login(
 
         credential.password_hash = hash_password(payload.password)
 
-    now = datetime.now(tz=UTC)
-    session_row = Session(
-        id=new_id(),
-        tenant_id=user.tenant_id,
-        user_id=user.id,
-        device_id=payload.device.name if payload.device else None,
-        ip=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
-        expires_at=now + timedelta(days=settings.refresh_token_days),
-    )
-    session.add(session_row)
-    await session.flush()
-
-    raw_refresh, refresh_hash = new_refresh_token()
-    session.add(
-        RefreshToken(
-            id=new_id(),
-            session_id=session_row.id,
-            token_hash=refresh_hash,
-            expires_at=now + timedelta(days=settings.refresh_token_days),
-        )
-    )
-
-    user.last_login_at = now
-    roles = [role.code for role in await roles_for_user(session, user.id)]
-    _, permissions = await effective_permissions(session, user.id)
-
-    await audit(
-        session,
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action="auth.login",
-        target_type="session",
-        target_id=str(session_row.id),
-        request=request,
-    )
-    await session.commit()
-
-    tokens = _issue(
+    tokens = await start_session(
         request,
-        user=user,
-        session_id=session_row.id,
-        roles=roles,
-        permissions=permissions,
-        refresh_token=raw_refresh,
+        session,
+        user,
+        device_name=payload.device.name if payload.device else None,
+        action="auth.login",
     )
     return JSONResponse(envelope(request, tokens.model_dump(mode="json")))
 
@@ -239,7 +158,7 @@ async def refresh(payload: RefreshRequest, request: Request, session: SessionDep
     _, permissions = await effective_permissions(session, user.id)
     await session.commit()
 
-    tokens = _issue(
+    tokens = issue_tokens(
         request,
         user=user,
         session_id=session_row.id,
@@ -307,6 +226,7 @@ async def me(principal: PrincipalDep, request: Request, session: SessionDep) -> 
 async def forgot_password(
     payload: ForgotPasswordRequest, request: Request, session: SessionDep
 ) -> JSONResponse:
+    await verify_captcha(request, payload.captcha_token)
     user = await get_user_by_email(session, str(payload.email))
     if user is not None and user.status == "ACTIVE":
         raw_token = secrets.token_urlsafe(32)
@@ -352,6 +272,7 @@ async def forgot_password(
 async def reset_password(
     payload: ResetPasswordRequest, request: Request, session: SessionDep
 ) -> Response:
+    await verify_captcha(request, payload.captcha_token)
     token_hash = hash_token(payload.token)
     token = (
         await session.execute(

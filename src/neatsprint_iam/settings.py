@@ -23,5 +23,17 @@ class Settings(ServiceSettings):
     smtp_from: str = "NeatSprint <no-reply@neatsprint.local>"
     email_enabled: bool = True
 
+    captcha_secret: str | None = None
+    captcha_verify_url: str = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
+    google_client_id: str | None = None
+
+    s3_endpoint: str | None = None
+    s3_public_endpoint: str | None = None
+    s3_bucket: str = "neatsprint"
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    s3_region: str = "us-east-1"
+
 
 settings = Settings()

@@ -5,8 +5,8 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import JSONResponse
-from neatsprint_lib.auth import Principal, require_permission
+from fastapi.responses import JSONResponse, Response
+from neatsprint_lib.auth import Principal, get_principal, require_permission
 from neatsprint_lib.errors import ApiError
 from neatsprint_lib.events import enqueue
 from sqlalchemy import func, or_, select
@@ -14,7 +14,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from neatsprint_iam.api.deps import SessionDep
 from neatsprint_iam.api.responses import envelope
-from neatsprint_iam.api.schemas import AssignRolesRequest, ProfileOut, UserOut
+from neatsprint_iam.api.schemas import (
+    AssignRolesRequest,
+    AvatarConfirmRequest,
+    AvatarOut,
+    AvatarPresignRequest,
+    ProfileOut,
+    UserOut,
+)
 from neatsprint_iam.db.models import Session, User
 from neatsprint_iam.services.accounts import (
     effective_permissions,
@@ -23,12 +30,19 @@ from neatsprint_iam.services.accounts import (
     set_user_roles,
 )
 from neatsprint_iam.services.audit import audit
+from neatsprint_iam.services.storage import (
+    ALLOWED_IMAGE_TYPES,
+    avatar_key,
+    presign_upload,
+    read_object,
+)
 
 router = APIRouter(prefix="/iam", tags=["users"])
 
 ReadPrincipal = Annotated[Principal, Depends(require_permission("core:user:read"))]
 ManagePrincipal = Annotated[Principal, Depends(require_permission("core:role:manage"))]
 UpdatePrincipal = Annotated[Principal, Depends(require_permission("core:user:update"))]
+AnyPrincipal = Annotated[Principal, Depends(get_principal)]
 
 
 async def _user_out(session: AsyncSession, user: User) -> UserOut:
@@ -193,6 +207,82 @@ async def update_user(
     )
     await session.commit()
     return JSONResponse(envelope(request, (await _user_out(session, user)).model_dump(mode="json")))
+
+
+@router.post("/users/{user_id}/avatar/presign", summary="Prepare an avatar upload")
+async def presign_avatar(
+    user_id: UUID,
+    payload: AvatarPresignRequest,
+    principal: AnyPrincipal,
+    request: Request,
+    session: SessionDep,
+) -> JSONResponse:
+    if principal.user_id != user_id and not principal.can("core:user:update"):
+        raise ApiError(403, "permission_denied", "You cannot change this avatar.")
+    user = await get_user(session, tenant_id=principal.tenant_id, user_id=user_id)
+    if user is None:
+        raise ApiError(404, "not_found", "User not found.")
+    if payload.content_type not in ALLOWED_IMAGE_TYPES:
+        raise ApiError(422, "validation_failed", "Avatar must be PNG, JPEG or WebP.")
+
+    key = avatar_key(str(principal.tenant_id), str(user.id), payload.content_type)
+    url = presign_upload(request, key, payload.content_type)
+    return JSONResponse(
+        envelope(
+            request,
+            {
+                "upload_url": url,
+                "object_key": key,
+                "expires_in": 300,
+            },
+        )
+    )
+
+
+@router.post("/users/{user_id}/avatar/confirm", summary="Confirm an avatar upload")
+async def confirm_avatar(
+    user_id: UUID,
+    payload: AvatarConfirmRequest,
+    principal: AnyPrincipal,
+    request: Request,
+    session: SessionDep,
+) -> JSONResponse:
+    if principal.user_id != user_id and not principal.can("core:user:update"):
+        raise ApiError(403, "permission_denied", "You cannot change this avatar.")
+    user = await get_user(session, tenant_id=principal.tenant_id, user_id=user_id)
+    if user is None:
+        raise ApiError(404, "not_found", "User not found.")
+
+    prefix = f"tenant/{principal.tenant_id}/avatars/{user.id}/"
+    if not payload.object_key.startswith(prefix):
+        raise ApiError(422, "validation_failed", "Invalid object key.")
+
+    user.avatar_key = payload.object_key
+    user.avatar_url = f"/api/v1/iam/users/{user.id}/avatar"
+    await audit(
+        session,
+        tenant_id=principal.tenant_id,
+        actor_id=principal.user_id,
+        action="user.avatar_changed",
+        target_type="user",
+        target_id=str(user.id),
+        request=request,
+    )
+    await session.commit()
+    return JSONResponse(
+        envelope(request, AvatarOut(avatar_url=user.avatar_url).model_dump(mode="json"))
+    )
+
+
+@router.get("/users/{user_id}/avatar", summary="Read a user avatar")
+async def get_avatar(
+    user_id: UUID, principal: AnyPrincipal, request: Request, session: SessionDep
+) -> Response:
+    user = await get_user(session, tenant_id=principal.tenant_id, user_id=user_id)
+    if user is None or not user.avatar_key:
+        raise ApiError(404, "not_found", "Avatar not found.")
+    content, content_type = await read_object(request, user.avatar_key)
+    return Response(content=content, media_type=content_type)
 
 
 @router.get("/me/profile", summary="Full profile for the current user")
