@@ -16,6 +16,8 @@ class Settings(ServiceSettings):
     service_token: str | None = None
     outbox_enabled: bool = True
     outbox_stream: str = "neatsprint.events"
+    events_consumer_enabled: bool = True
+    events_consumer_group: str = "iam-notifications"
     web_base_url: str = "http://localhost:3000"
 
     smtp_host: str = "mailpit"

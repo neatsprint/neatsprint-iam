@@ -20,12 +20,14 @@ from neatsprint_lib.logging import configure_logging
 from neatsprint_iam.api.auth import router as auth_router
 from neatsprint_iam.api.internal import router as internal_router
 from neatsprint_iam.api.invitations import router as invitations_router
+from neatsprint_iam.api.notifications import router as notifications_router
 from neatsprint_iam.api.roles import router as roles_router
 from neatsprint_iam.api.social import router as social_router
 from neatsprint_iam.api.users import router as users_router
 from neatsprint_iam.security.keys import load_or_create_keys
 from neatsprint_iam.security.tokens import jwks
 from neatsprint_iam.services.accounts import ensure_permission_catalogue
+from neatsprint_iam.services.event_consumer import run_consumer
 from neatsprint_iam.settings import settings
 
 logger = logging.getLogger(__name__)
@@ -85,6 +87,20 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             )
         )
 
+    consumer_stop: asyncio.Event | None = None
+    consumer_task: asyncio.Task[None] | None = None
+    if engine is not None and settings.redis_url and settings.events_consumer_enabled:
+        consumer_stop = asyncio.Event()
+        consumer_task = asyncio.create_task(
+            run_consumer(
+                app.state.session_factory,
+                settings.redis_url,
+                settings.outbox_stream,
+                settings.events_consumer_group,
+                consumer_stop,
+            )
+        )
+
     try:
         yield
     finally:
@@ -95,6 +111,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                 await asyncio.wait_for(outbox_task, timeout=5)
             except TimeoutError:
                 outbox_task.cancel()
+        if consumer_stop is not None:
+            consumer_stop.set()
+        if consumer_task is not None:
+            try:
+                await asyncio.wait_for(consumer_task, timeout=5)
+            except TimeoutError:
+                consumer_task.cancel()
         if engine is not None:
             await engine.dispose()
 
@@ -137,6 +160,7 @@ app.include_router(social_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1")
 app.include_router(invitations_router, prefix="/api/v1")
+app.include_router(notifications_router, prefix="/api/v1")
 app.include_router(internal_router)
 
 
