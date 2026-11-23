@@ -252,3 +252,24 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class Notification(Base, TenantMixin, TimestampMixin):
+    __tablename__ = "notifications"
+    __table_args__ = (
+        Index("ix_notifications_user", "tenant_id", "user_id", "read_at", "created_at"),
+        UniqueConstraint("source_event_id", name="uq_notifications_source_event"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=new_id
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    type: Mapped[str] = mapped_column(String(32), nullable=False, default="ITEM_ASSIGNED")
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text)
+    link: Mapped[str | None] = mapped_column(String(512))
+    source_event_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
