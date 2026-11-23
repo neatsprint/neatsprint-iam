@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from neatsprint_iam.api.deps import SessionDep, require_bootstrap
 from neatsprint_iam.api.responses import envelope
-from neatsprint_iam.api.schemas import BootstrapUserRequest
+from neatsprint_iam.api.schemas import BootstrapUserRequest, UserLookupRequest
 from neatsprint_iam.db.models import Role, User, UserCredential
 from neatsprint_iam.security.passwords import hash_password
 from neatsprint_iam.services.accounts import (
@@ -141,5 +141,37 @@ async def bootstrap_user(
                 "email": user.email,
                 "roles": sorted(role.code for role in roles),
             },
+        )
+    )
+
+
+@router.post("/users/lookup", summary="Batch user summaries for internal callers")
+async def lookup_users(
+    payload: UserLookupRequest,
+    _: BootstrapDep,
+    request: Request,
+    session: SessionDep,
+) -> JSONResponse:
+    rows = (
+        await session.execute(
+            select(User).where(
+                User.tenant_id == payload.tenant_id,
+                User.id.in_(payload.user_ids),
+                User.deleted_at.is_(None),
+            )
+        )
+    ).scalars()
+    return JSONResponse(
+        envelope(
+            request,
+            [
+                {
+                    "id": str(user.id),
+                    "email": user.email,
+                    "full_name": user.full_name,
+                    "status": user.status,
+                }
+                for user in rows
+            ],
         )
     )

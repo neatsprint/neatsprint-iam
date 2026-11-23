@@ -166,3 +166,8 @@ class BootstrapUserRequest(BaseModel):
     full_name: str
     password: str = Field(min_length=10, max_length=256)
     role_codes: list[str] = Field(default_factory=lambda: ["MEMBER"])
+
+
+class UserLookupRequest(BaseModel):
+    tenant_id: UUID
+    user_ids: list[UUID] = Field(min_length=1, max_length=200)
