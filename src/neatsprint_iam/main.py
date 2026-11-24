@@ -16,6 +16,7 @@ from neatsprint_lib.db import check_database, create_engine, create_session_fact
 from neatsprint_lib.errors import ApiError, install_error_handlers
 from neatsprint_lib.events import run_relay
 from neatsprint_lib.logging import configure_logging
+from redis.asyncio import Redis
 
 from neatsprint_iam.api.audit import router as audit_router
 from neatsprint_iam.api.auth import router as auth_router
@@ -49,6 +50,11 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         engine = create_engine(settings.database_url)
         app.state.engine = engine
         app.state.session_factory = create_session_factory(engine)
+    app.state.redis = (
+        Redis.from_url(settings.redis_url, decode_responses=True)
+        if settings.redis_url
+        else None
+    )
 
     private_key, public_key, kid = load_or_create_keys(
         settings.jwt_private_key_path,
@@ -119,6 +125,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                 await asyncio.wait_for(consumer_task, timeout=5)
             except TimeoutError:
                 consumer_task.cancel()
+        redis = getattr(app.state, "redis", None)
+        if redis is not None:
+            await redis.aclose()
         if engine is not None:
             await engine.dispose()
 

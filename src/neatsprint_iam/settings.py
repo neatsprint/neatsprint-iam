@@ -10,6 +10,8 @@ class Settings(ServiceSettings):
     access_token_minutes: int = 15
     refresh_token_days: int = 7
     password_min_length: int = 10
+    login_max_failures: int = 5
+    login_failure_window_minutes: int = 15
 
     bootstrap_token: str | None = None
     core_internal_url: str = "http://neatsprint-core:8000"
