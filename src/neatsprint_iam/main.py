@@ -17,6 +17,7 @@ from neatsprint_lib.errors import ApiError, install_error_handlers
 from neatsprint_lib.events import run_relay
 from neatsprint_lib.logging import configure_logging
 
+from neatsprint_iam.api.audit import router as audit_router
 from neatsprint_iam.api.auth import router as auth_router
 from neatsprint_iam.api.internal import router as internal_router
 from neatsprint_iam.api.invitations import router as invitations_router
@@ -156,6 +157,7 @@ async def ping() -> dict[str, str]:
 
 
 app.include_router(auth_router, prefix="/api/v1")
+app.include_router(audit_router, prefix="/api/v1")
 app.include_router(social_router, prefix="/api/v1")
 app.include_router(users_router, prefix="/api/v1")
 app.include_router(roles_router, prefix="/api/v1")
