@@ -48,6 +48,8 @@ from neatsprint_iam.services.accounts import (
 )
 from neatsprint_iam.services.audit import audit
 from neatsprint_iam.services.captcha import verify_captcha
+from neatsprint_iam.services.lockout import clear as clear_lockout
+from neatsprint_iam.services.lockout import is_locked, record_failure
 from neatsprint_iam.services.mailer import send_password_reset
 from neatsprint_iam.services.session_tokens import issue_tokens, start_session
 
@@ -61,6 +63,15 @@ async def login(
     payload: LoginRequest, request: Request, session: SessionDep
 ) -> JSONResponse:
     await verify_captcha(request, payload.captcha_token)
+    settings = request.app.state.settings
+    redis = getattr(request.app.state, "redis", None)
+    email = normalise_email(str(payload.email))
+    if await is_locked(redis, email, settings.login_max_failures):
+        raise ApiError(
+            429,
+            "account_locked",
+            "Too many failed sign-in attempts. Try again later.",
+        )
     user = await get_user_by_email(session, str(payload.email))
     credential = await session.get(UserCredential, user.id) if user else None
 
@@ -70,6 +81,12 @@ async def login(
         or user.status != "ACTIVE"
         or not verify_password(credential.password_hash, payload.password)
     ):
+        await record_failure(
+            redis,
+            email,
+            max_failures=settings.login_max_failures,
+            window_seconds=settings.login_failure_window_minutes * 60,
+        )
         await audit(
             session,
             tenant_id=user.tenant_id if user else None,
@@ -87,6 +104,7 @@ async def login(
 
         credential.password_hash = hash_password(payload.password)
 
+    await clear_lockout(redis, email)
     tokens = await start_session(
         request,
         session,
