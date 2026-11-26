@@ -8,7 +8,7 @@ from neatsprint_lib.errors import ApiError
 from neatsprint_lib.events import enqueue
 from sqlalchemy import select
 
-from neatsprint_iam.api.deps import SessionDep, require_bootstrap
+from neatsprint_iam.api.deps import AdminSessionDep, require_bootstrap
 from neatsprint_iam.api.responses import envelope
 from neatsprint_iam.api.schemas import BootstrapUserRequest, UserLookupRequest
 from neatsprint_iam.db.models import Role, User, UserCredential
@@ -51,7 +51,7 @@ async def verify(request: Request) -> Response:
 
 @router.post("/tenants/{tenant_id}/bootstrap", summary="Create system roles for a tenant")
 async def bootstrap_tenant(
-    tenant_id: str, _: BootstrapDep, request: Request, session: SessionDep
+    tenant_id: str, _: BootstrapDep, request: Request, session: AdminSessionDep
 ) -> JSONResponse:
     from uuid import UUID
 
@@ -70,7 +70,7 @@ async def bootstrap_user(
     payload: BootstrapUserRequest,
     _: BootstrapDep,
     request: Request,
-    session: SessionDep,
+    session: AdminSessionDep,
 ) -> JSONResponse:
     email = normalise_email(str(payload.email))
     existing = await get_user_by_email(session, email)
@@ -150,7 +150,7 @@ async def lookup_users(
     payload: UserLookupRequest,
     _: BootstrapDep,
     request: Request,
-    session: SessionDep,
+    session: AdminSessionDep,
 ) -> JSONResponse:
     rows = (
         await session.execute(

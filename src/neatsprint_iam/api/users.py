@@ -12,7 +12,7 @@ from neatsprint_lib.events import enqueue
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from neatsprint_iam.api.deps import SessionDep
+from neatsprint_iam.api.deps import TenantSessionDep
 from neatsprint_iam.api.responses import envelope
 from neatsprint_iam.api.schemas import (
     AssignRolesRequest,
@@ -62,7 +62,7 @@ async def _user_out(session: AsyncSession, user: User) -> UserOut:
 async def list_users(
     principal: ReadPrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
     search: str | None = Query(default=None, max_length=120),
     status_filter: str | None = Query(default=None, alias="status"),
     page: int = Query(default=1, ge=1),
@@ -99,7 +99,7 @@ async def list_users(
 
 @router.get("/users/{user_id}", summary="Read a user")
 async def read_user(
-    user_id: UUID, principal: ReadPrincipal, request: Request, session: SessionDep
+    user_id: UUID, principal: ReadPrincipal, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     user = await get_user(session, tenant_id=principal.tenant_id, user_id=user_id)
     if user is None:
@@ -113,7 +113,7 @@ async def assign_roles(
     payload: AssignRolesRequest,
     principal: ManagePrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> JSONResponse:
     user = await get_user(session, tenant_id=principal.tenant_id, user_id=user_id)
     if user is None:
@@ -157,7 +157,7 @@ async def update_user(
     payload: dict[str, object],
     principal: UpdatePrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> JSONResponse:
     user = await get_user(session, tenant_id=principal.tenant_id, user_id=user_id)
     if user is None:
@@ -215,7 +215,7 @@ async def presign_avatar(
     payload: AvatarPresignRequest,
     principal: AnyPrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> JSONResponse:
     if principal.user_id != user_id and not principal.can("core:user:update"):
         raise ApiError(403, "permission_denied", "You cannot change this avatar.")
@@ -245,7 +245,7 @@ async def confirm_avatar(
     payload: AvatarConfirmRequest,
     principal: AnyPrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> JSONResponse:
     if principal.user_id != user_id and not principal.can("core:user:update"):
         raise ApiError(403, "permission_denied", "You cannot change this avatar.")
@@ -276,7 +276,7 @@ async def confirm_avatar(
 
 @router.get("/users/{user_id}/avatar", summary="Read a user avatar")
 async def get_avatar(
-    user_id: UUID, principal: AnyPrincipal, request: Request, session: SessionDep
+    user_id: UUID, principal: AnyPrincipal, request: Request, session: TenantSessionDep
 ) -> Response:
     user = await get_user(session, tenant_id=principal.tenant_id, user_id=user_id)
     if user is None or not user.avatar_key:
@@ -287,7 +287,7 @@ async def get_avatar(
 
 @router.get("/me/profile", summary="Full profile for the current user")
 async def profile(
-    principal: ReadPrincipal, request: Request, session: SessionDep
+    principal: ReadPrincipal, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     user = await get_user(session, tenant_id=principal.tenant_id, user_id=principal.user_id)
     if user is None:

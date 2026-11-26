@@ -12,7 +12,7 @@ from neatsprint_lib.events import enqueue
 from neatsprint_lib.ids import new_id
 from sqlalchemy import select
 
-from neatsprint_iam.api.deps import SessionDep
+from neatsprint_iam.api.deps import TenantSessionDep
 from neatsprint_iam.api.responses import envelope
 from neatsprint_iam.api.schemas import InvitationAccept, InvitationCreate, InvitationOut
 from neatsprint_iam.db.models import Invitation, Role
@@ -52,7 +52,7 @@ async def create_invitation(
     payload: InvitationCreate,
     principal: InvitePrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> JSONResponse:
     email = normalise_email(str(payload.email))
     if await get_user_by_email(session, email) is not None:
@@ -145,7 +145,7 @@ async def create_invitation(
 
 @router.get("/invitations", summary="List pending invitations")
 async def list_invitations(
-    principal: InvitePrincipal, request: Request, session: SessionDep
+    principal: InvitePrincipal, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     rows = (
         await session.execute(
@@ -172,7 +172,7 @@ async def revoke_invitation(
     invitation_id: str,
     principal: InvitePrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> Response:
     invitation = await session.get(Invitation, invitation_id)
     if invitation is None or invitation.tenant_id != principal.tenant_id:
@@ -201,7 +201,7 @@ async def resend_invitation(
     invitation_id: str,
     principal: InvitePrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> JSONResponse:
     invitation = await session.get(Invitation, invitation_id)
     if invitation is None or invitation.tenant_id != principal.tenant_id:
@@ -246,7 +246,7 @@ async def resend_invitation(
     summary="Accept an invitation and create the account",
 )
 async def accept_invitation(
-    payload: InvitationAccept, request: Request, session: SessionDep
+    payload: InvitationAccept, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     await verify_captcha(request, payload.captcha_token)
     token_hash = hash_token(payload.token)
