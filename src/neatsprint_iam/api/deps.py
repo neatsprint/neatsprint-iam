@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import Depends, Header, Request
@@ -10,7 +11,24 @@ from neatsprint_lib.errors import ApiError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 SessionDep = Annotated[AsyncSession, Depends(get_session)]
+AdminSessionDep = Annotated[AsyncSession, Depends(get_session)]
 PrincipalDep = Annotated[object, Depends(get_principal)]
+
+
+async def get_tenant_optional_session(request: Request) -> AsyncIterator[AsyncSession]:
+    """Bind the tenant when a user token is present; leave unbound for auth/internal calls."""
+    factory = request.app.state.session_factory
+    async with factory() as session:
+        try:
+            principal = await get_principal(request)
+        except ApiError:
+            pass
+        else:
+            session.info["tenant_id"] = str(principal.tenant_id)
+        yield session
+
+
+TenantSessionDep = Annotated[AsyncSession, Depends(get_tenant_optional_session)]
 
 
 async def require_bootstrap(

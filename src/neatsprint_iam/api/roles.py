@@ -12,7 +12,7 @@ from neatsprint_lib.ids import new_id
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from neatsprint_iam.api.deps import SessionDep
+from neatsprint_iam.api.deps import TenantSessionDep
 from neatsprint_iam.api.responses import envelope
 from neatsprint_iam.api.schemas import RoleCreate, RoleUpdate
 from neatsprint_iam.db.models import Permission, Role, RolePermission, UserRole
@@ -45,7 +45,7 @@ async def _set_permissions(session: AsyncSession, role_id: UUID, codes: list[str
 
 @router.get("/roles", summary="List roles with their permissions")
 async def list_roles(
-    principal: ReadPrincipal, request: Request, session: SessionDep
+    principal: ReadPrincipal, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     roles = (
         await session.execute(
@@ -80,7 +80,7 @@ async def list_roles(
 
 @router.get("/permissions", summary="Permission catalogue")
 async def list_permissions(
-    principal: ReadPrincipal, request: Request, session: SessionDep
+    principal: ReadPrincipal, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     rows = (await session.execute(select(Permission).order_by(Permission.code))).scalars()
     return JSONResponse(
@@ -96,7 +96,7 @@ async def list_permissions(
 
 @router.get("/roles/{role_id}", summary="Read a role")
 async def read_role(
-    role_id: str, principal: ReadPrincipal, request: Request, session: SessionDep
+    role_id: str, principal: ReadPrincipal, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     role = await session.get(Role, role_id)
     if role is None or role.tenant_id != principal.tenant_id:
@@ -126,7 +126,7 @@ async def create_role(
     payload: RoleCreate,
     principal: ManagePrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> JSONResponse:
     await _validate_permissions(session, payload.permissions)
     existing = (
@@ -190,7 +190,7 @@ async def update_role(
     payload: RoleUpdate,
     principal: ManagePrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> JSONResponse:
     role = await session.get(Role, role_id)
     if role is None or role.tenant_id != principal.tenant_id:
@@ -252,7 +252,7 @@ async def delete_role(
     role_id: UUID,
     principal: ManagePrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> Response:
     role = await session.get(Role, role_id)
     if role is None or role.tenant_id != principal.tenant_id:

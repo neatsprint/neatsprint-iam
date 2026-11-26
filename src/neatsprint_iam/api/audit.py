@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from neatsprint_lib.auth import Principal, require_permission
 from sqlalchemy import select
 
-from neatsprint_iam.api.deps import SessionDep
+from neatsprint_iam.api.deps import TenantSessionDep
 from neatsprint_iam.api.responses import envelope
 from neatsprint_iam.db.models import AuditLog
 
@@ -39,7 +39,7 @@ def _payload(row: AuditLog) -> dict[str, object]:
 async def list_audit(
     principal: AuditView,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
     action: str | None = Query(default=None, max_length=64),
     actor_id: UUID | None = Query(default=None),
     from_date: date | None = Query(default=None, alias="from"),

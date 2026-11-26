@@ -13,7 +13,7 @@ from neatsprint_lib.events import enqueue
 from neatsprint_lib.ids import new_id
 from sqlalchemy import select, update
 
-from neatsprint_iam.api.deps import SessionDep
+from neatsprint_iam.api.deps import TenantSessionDep
 from neatsprint_iam.api.responses import envelope
 from neatsprint_iam.api.schemas import (
     ForgotPasswordRequest,
@@ -60,7 +60,7 @@ PrincipalDep = Annotated[Principal, Depends(get_principal)]
 
 @router.post("/login", response_model=None, summary="Exchange credentials for tokens")
 async def login(
-    payload: LoginRequest, request: Request, session: SessionDep
+    payload: LoginRequest, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     await verify_captcha(request, payload.captcha_token)
     settings = request.app.state.settings
@@ -116,7 +116,9 @@ async def login(
 
 
 @router.post("/refresh", summary="Rotate a refresh token")
-async def refresh(payload: RefreshRequest, request: Request, session: SessionDep) -> JSONResponse:
+async def refresh(
+    payload: RefreshRequest, request: Request, session: TenantSessionDep
+) -> JSONResponse:
     settings = request.app.state.settings
     token_hash = hash_token(payload.refresh_token)
     result = await session.execute(
@@ -188,7 +190,7 @@ async def refresh(payload: RefreshRequest, request: Request, session: SessionDep
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT, summary="Revoke the session")
-async def logout(principal: PrincipalDep, request: Request, session: SessionDep) -> Response:
+async def logout(principal: PrincipalDep, request: Request, session: TenantSessionDep) -> Response:
     if principal.session_id:
         session_row = await session.get(Session, principal.session_id)
         if session_row is not None and session_row.revoked_at is None:
@@ -214,7 +216,7 @@ async def logout(principal: PrincipalDep, request: Request, session: SessionDep)
 
 
 @router.get("/me", summary="Current user profile and permissions")
-async def me(principal: PrincipalDep, request: Request, session: SessionDep) -> JSONResponse:
+async def me(principal: PrincipalDep, request: Request, session: TenantSessionDep) -> JSONResponse:
     user = await session.get(User, principal.user_id)
     if user is None or user.status != "ACTIVE":
         raise ApiError(401, "invalid_credentials", "This account is not active.")
@@ -242,7 +244,7 @@ async def me(principal: PrincipalDep, request: Request, session: SessionDep) -> 
     summary="Request a password reset",
 )
 async def forgot_password(
-    payload: ForgotPasswordRequest, request: Request, session: SessionDep
+    payload: ForgotPasswordRequest, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     await verify_captcha(request, payload.captcha_token)
     user = await get_user_by_email(session, str(payload.email))
@@ -288,7 +290,7 @@ async def forgot_password(
     summary="Complete a password reset",
 )
 async def reset_password(
-    payload: ResetPasswordRequest, request: Request, session: SessionDep
+    payload: ResetPasswordRequest, request: Request, session: TenantSessionDep
 ) -> Response:
     await verify_captcha(request, payload.captcha_token)
     token_hash = hash_token(payload.token)
@@ -364,7 +366,7 @@ async def reset_password(
 
 @router.get("/sessions", summary="List my active sessions")
 async def list_sessions(
-    principal: PrincipalDep, request: Request, session: SessionDep
+    principal: PrincipalDep, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     rows = (
         await session.execute(
@@ -395,7 +397,7 @@ async def list_sessions(
     summary="Revoke one of my sessions",
 )
 async def revoke_session(
-    session_id: UUID, principal: PrincipalDep, request: Request, session: SessionDep
+    session_id: UUID, principal: PrincipalDep, request: Request, session: TenantSessionDep
 ) -> Response:
     row = await session.get(Session, session_id)
     if row is None or row.user_id != principal.user_id:
@@ -428,7 +430,7 @@ async def revoke_session(
     summary="Revoke every session for my account",
 )
 async def logout_all(
-    principal: PrincipalDep, request: Request, session: SessionDep
+    principal: PrincipalDep, request: Request, session: TenantSessionDep
 ) -> Response:
     now = datetime.now(tz=UTC)
     sessions = (

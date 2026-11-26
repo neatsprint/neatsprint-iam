@@ -10,7 +10,7 @@ from neatsprint_lib.errors import ApiError
 from neatsprint_lib.events import enqueue
 from sqlalchemy import select
 
-from neatsprint_iam.api.deps import SessionDep
+from neatsprint_iam.api.deps import TenantSessionDep
 from neatsprint_iam.api.responses import envelope
 from neatsprint_iam.api.schemas import GoogleLoginRequest
 from neatsprint_iam.db.models import Invitation, SocialAccount
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/social/google", summary="Sign in with a Google ID token")
 async def google_login(
-    payload: GoogleLoginRequest, request: Request, session: SessionDep
+    payload: GoogleLoginRequest, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     await verify_captcha(request, payload.captcha_token)
     client_id = request.app.state.settings.google_client_id

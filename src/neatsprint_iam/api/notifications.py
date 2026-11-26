@@ -12,7 +12,7 @@ from neatsprint_lib.auth import Principal, get_principal
 from neatsprint_lib.errors import ApiError
 from sqlalchemy import func, select, update
 
-from neatsprint_iam.api.deps import SessionDep
+from neatsprint_iam.api.deps import TenantSessionDep
 from neatsprint_iam.api.responses import envelope
 from neatsprint_iam.db.models import Notification
 
@@ -37,7 +37,7 @@ def _payload(notification: Notification) -> dict[str, object]:
 async def list_notifications(
     principal: CurrentPrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
     unread_only: bool = Query(default=False),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> JSONResponse:
@@ -68,7 +68,7 @@ async def list_notifications(
 
 @router.post("/read-all", summary="Mark every notification as read")
 async def mark_all_read(
-    principal: CurrentPrincipal, request: Request, session: SessionDep
+    principal: CurrentPrincipal, request: Request, session: TenantSessionDep
 ) -> JSONResponse:
     result = await session.execute(
         update(Notification)
@@ -88,7 +88,7 @@ async def mark_read(
     notification_id: UUID,
     principal: CurrentPrincipal,
     request: Request,
-    session: SessionDep,
+    session: TenantSessionDep,
 ) -> JSONResponse:
     notification = await session.get(Notification, notification_id)
     if (
