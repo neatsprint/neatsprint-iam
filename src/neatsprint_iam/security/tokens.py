@@ -29,6 +29,7 @@ def create_access_token(
     roles: list[str],
     permissions: list[str] | tuple[str, ...] | frozenset[str],
     minutes: int = 15,
+    device_id: UUID | None = None,
 ) -> tuple[str, int]:
     now = datetime.now(tz=UTC)
     expires = now + timedelta(minutes=minutes)
@@ -44,6 +45,8 @@ def create_access_token(
         "iat": now,
         "exp": expires,
     }
+    if device_id is not None:
+        payload["did"] = str(device_id)
     token = jwt.encode(payload, private_key, algorithm="RS256", headers={"kid": kid})
     return token, minutes * 60
 

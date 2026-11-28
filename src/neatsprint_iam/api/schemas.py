@@ -19,6 +19,10 @@ class LoginRequest(BaseModel):
     captcha_token: str | None = None
 
 
+class DeviceSessionRequest(BaseModel):
+    device_id: UUID
+
+
 class RefreshRequest(BaseModel):
     refresh_token: str = Field(min_length=16, max_length=512)
 

@@ -24,6 +24,7 @@ def issue_tokens(
     roles: list[str],
     permissions: list[str],
     refresh_token: str,
+    device_id: UUID | None = None,
 ) -> TokenPair:
     settings = request.app.state.settings
     access, expires_in = create_access_token(
@@ -37,6 +38,7 @@ def issue_tokens(
         roles=roles,
         permissions=permissions,
         minutes=settings.access_token_minutes,
+        device_id=device_id,
     )
     return TokenPair(
         access_token=access,
@@ -59,6 +61,7 @@ async def start_session(
     user: User,
     *,
     device_name: str | None = None,
+    device_id: UUID | None = None,
     action: str = "auth.login",
 ) -> TokenPair:
     settings = request.app.state.settings
@@ -69,6 +72,7 @@ async def start_session(
         tenant_id=user.tenant_id,
         user_id=user.id,
         device_id=device_name,
+        bound_device_id=device_id,
         ip=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
         expires_at=now + timedelta(days=settings.refresh_token_days),
@@ -108,4 +112,5 @@ async def start_session(
         roles=roles,
         permissions=permissions,
         refresh_token=raw_refresh,
+        device_id=device_id,
     )

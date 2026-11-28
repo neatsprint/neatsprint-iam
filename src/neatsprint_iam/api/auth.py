@@ -16,6 +16,7 @@ from sqlalchemy import select, update
 from neatsprint_iam.api.deps import TenantSessionDep
 from neatsprint_iam.api.responses import envelope
 from neatsprint_iam.api.schemas import (
+    DeviceSessionRequest,
     ForgotPasswordRequest,
     LoginRequest,
     ProfileOut,
@@ -48,6 +49,7 @@ from neatsprint_iam.services.accounts import (
 )
 from neatsprint_iam.services.audit import audit
 from neatsprint_iam.services.captcha import verify_captcha
+from neatsprint_iam.services.device_proof import body_hash, enforce_device_proof
 from neatsprint_iam.services.lockout import clear as clear_lockout
 from neatsprint_iam.services.lockout import is_locked, record_failure
 from neatsprint_iam.services.mailer import send_password_reset
@@ -185,6 +187,48 @@ async def refresh(
         roles=roles,
         permissions=permissions,
         refresh_token=raw_refresh,
+        device_id=session_row.bound_device_id,
+    )
+    return JSONResponse(envelope(request, tokens.model_dump(mode="json")))
+
+
+@router.post("/device-session", summary="Bind this session to a registered device")
+async def device_session(
+    payload: DeviceSessionRequest,
+    principal: PrincipalDep,
+    request: Request,
+    session: TenantSessionDep,
+) -> JSONResponse:
+    raw = await request.body()
+    device = await enforce_device_proof(
+        request,
+        principal,
+        device_id=payload.device_id,
+        method="POST",
+        path="/api/v1/auth/device-session",
+        body_sha256=body_hash(raw),
+    )
+    if device is None:  # pragma: no cover - explicit device id always checks
+        raise ApiError(401, "device_proof_required", "A device proof is required.")
+
+    user = await session.get(User, principal.user_id)
+    if user is None or user.status != "ACTIVE":
+        raise ApiError(401, "invalid_credentials", "This account is not active.")
+
+    if principal.session_id:
+        previous = await session.get(Session, UUID(principal.session_id))
+        if previous is not None and previous.revoked_at is None:
+            previous.revoked_at = datetime.now(tz=UTC)
+            previous.revoke_reason = "device_bound"
+            await session.commit()
+
+    tokens = await start_session(
+        request,
+        session,
+        user,
+        device_name=str(device.get("name") or "Desktop agent"),
+        device_id=payload.device_id,
+        action="auth.device_bound",
     )
     return JSONResponse(envelope(request, tokens.model_dump(mode="json")))
 
