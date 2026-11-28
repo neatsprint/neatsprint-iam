@@ -98,6 +98,7 @@ class Session(Base, TenantMixin):
         PG_UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     device_id: Mapped[str | None] = mapped_column(String(128))
+    bound_device_id: Mapped[uuid.UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     ip: Mapped[str | None] = mapped_column(String(64))
     user_agent: Mapped[str | None] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

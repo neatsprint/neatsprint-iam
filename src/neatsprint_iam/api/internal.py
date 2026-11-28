@@ -19,6 +19,7 @@ from neatsprint_iam.services.accounts import (
     normalise_email,
     set_user_roles,
 )
+from neatsprint_iam.services.device_proof import enforce_device_proof
 from neatsprint_iam.services.limits import enforce_user_seat_limit
 
 router = APIRouter(prefix="/internal", tags=["internal"])
@@ -38,6 +39,7 @@ def _bearer(request: Request) -> str:
 async def verify(request: Request) -> Response:
     verifier = request.app.state.token_verifier
     principal = await verifier.verify(_bearer(request))
+    await enforce_device_proof(request, principal)
     return Response(
         status_code=200,
         headers={

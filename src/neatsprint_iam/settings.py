@@ -15,6 +15,7 @@ class Settings(ServiceSettings):
 
     bootstrap_token: str | None = None
     core_internal_url: str = "http://neatsprint-core:8000"
+    monitoring_internal_url: str = "http://neatsprint-monitoring:8000"
     service_token: str | None = None
     outbox_enabled: bool = True
     outbox_stream: str = "neatsprint.events"
